@@ -1,158 +1,77 @@
-from shapely.geometry import (
-    Point, MultiPoint, LineString, MultiLineString, Polygon
-    )
-from shapely.ops import unary_union
 import math
-
+from dataclasses import dataclass
+from functools import cached_property
+from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, Polygon
+from shapely.ops import unary_union
 from segment import Segment
 
-class Pillar: 
-    """
-    Pillar is the second level of classes forming a dam.
-    A pillar consists of one or more segments.
-    One or more pillars form a dam.
-    
-    """
-    
-    def __init__(
-            self, segments, contact_l, contact_r,
-            crest_width, phi, dam_type, name
-            ):
-        """
-        Parameters
-        ----------
-        segments : list
-            List of instances of class Segment
-        contact_l : float
-            Elevation of upstream contact point between dam and rock,
-            unit: masl
-        contact_r : float
-            Elevation of downstream contact point between dam and rock,
-            unit: masl
-        crest_width : positive float
-            Width of the dam crest,
-            length unit: m
-        phi : positive float
-            Friction angle,
-            unit: degrees
-        dam_type : string
-            Dam type, e.g. 'gravitasjonsdam', 'platedam'
-        name: string
-            Name
+@dataclass
+class Pillar:
+    segments: list
+    contact_left: float
+    contact_right: float
+    crest_width: float
+    phi: float
+    dam_type: str
+    name: str
 
-        Returns
-        -------
-        None.
+    def __post_init__(self):
+        # validate data class attributes
+        for seg in self.segments:
+            if not isinstance(seg, Segment):
+                raise ValueError('non-Segment in segments')
+        bb = self.bounding_box
+        for i in (self.contact_left, self.contact_right):
+            if i < bb['miny'] or i > bb['maxy']:
+                raise ValueError('contact left/right out of range')
+        if self.crest_width <= 0:
+            raise ValueError('invalid crest width')
+        if self.phi < 0 or self.phi > 90:
+            raise ValueError('invalid phi')
+        lower = self.dam_type.lower()
+        if not (lower.startswith('gr') or lower.startswith('pl')):
+            raise ValueError('dam type not recognised')
+        if not isinstance(self.name, str):
+            raise ValueError('invalid name')
 
-        """
-        self.segments = segments
-        self.contact_l = contact_l
-        self.contact_r = contact_r
-        self.crest_width = crest_width
-        self.phi = phi
-        self.dam_type = dam_type
-        self.name = name
-               
-    def get_union(self):
-        """
-        Returns
-        -------
-        shapely.geometry.polygon.Polygon
-            Union of segment polygons
-
-        """
+    @cached_property
+    def union(self):
         return unary_union([i.poly for i in self.segments])
-    
-    def highest_point(self):
-        """
-        Returns
-        -------
-        shapely.geometry.point.Point
-            Returns the highest point of each profile (lefternmost point if
-            there are multiple highest points)
 
-        """
-        x, y = self.get_union().exterior.coords.xy
+    @cached_property
+    def highest_point(self):
+        x, y = self.union.exterior.coords.xy
         index = y.index(max(y))
         return Point(x[index], y[index])
-    
-    def lowest_point(self):
-        """
-        Returns
-        -------
-        shapely.geometry.point.Point
-            Returns the lowest point of each profile (lefternmost point if
-            there are multiple lowest points)
 
-        """
-        x, y = self.get_union().exterior.coords.xy
-        index = y.index(min(y))
-        return Point(x[index], y[index])
-    
+    @cached_property
     def left_contact(self):
-        """
-        Returns
-        -------
-        shapely.geometry.point.Point
-            Upstream contact point between dam and rock
-
-        """
-        x, _ = self.get_union().exterior.coords.xy
-        line = LineString([(min(x) - 1, self.contact_l),
-                           (max(x) + 1, self.contact_l)])
-        splits = line.difference(self.get_union())
+        x, _ = self.union.exterior.coords.xy
+        line = LineString([
+            (min(x) - 1, self.contact_left),
+            (max(x) + 1, self.contact_left)])
+        splits = line.difference(self.union)
         x, y = splits[0].coords.xy
-        return Point(x[1], y[1])
-    
-    def right_contact(self):
-        """
-        Returns
-        -------
-        shapely.geometry.point.Point
-            Downstream contact point between dam and rock
+        return Point(x[-1], y[-1])
 
-        """
-        x, _ = self.get_union().exterior.coords.xy
-        line = LineString([(min(x) - 1, self.contact_r),
-                           (max(x) + 1, self.contact_r)])
-        splits = line.difference(self.get_union())
+    @cached_property
+    def right_contact(self):
+        x, _ = self.union.exterior.coords.xy
+        line = LineString([
+            (min(x) - 1, self.contact_right),
+            (max(x) + 1, self.contact_right)])
+        splits = line.difference(self.union)
         x, y = splits[-1].coords.xy
         return Point(x[0], y[0])
-    
-    def righternmost_x(self):
-        """
-        Returns
-        -------
-        float
-            Righternmost x-coordinate of profile
 
-        """
-        x, _ = self.get_union().exterior.coords.xy
-        return max(x)
-    
-    def lefternmost_x(self):
-        """
-        Returns
-        -------
-        float
-            Lefternmost x-coordinate of profile
+    @cached_property
+    def bounding_box(self):
+        return dict(zip(['minx', 'miny', 'maxx', 'maxy'], self.union.bounds))
 
-        """
-        x, _ = self.get_union().exterior.coords.xy
-        return min(x)
-    
+    @cached_property
     def cutting_surface(self):
-        """
-        Returns
-        -------
-        shapely.geometry.polygon.Polygon
-            Cutting surface that is generated by drawing a line between
-            the left and right contact, i.e. the shear surface
-
-        """
-        line = LineString([self.left_contact(),
-                           self.right_contact()])
-        polys = []     
+        line = LineString([self.left_contact, self.right_contact])
+        polys = []
         for seg in self.segments:
             if seg.poly.intersects(line):
                 intersec = seg.poly.intersection(line)
@@ -165,58 +84,32 @@ class Pillar:
                         coords = list(i.coords)
                         p0 = coords[0][0]
                         p1 = coords[-1][0]
-                        poly = Polygon([(p0, axis + width / 2),
-                                        (p1, axis + width / 2),
-                                        (p1, axis - width / 2),
-                                        (p0, axis - width / 2)])
-                        polys.append(poly)
+                        polys.append(Polygon([
+                            (p0, axis + width / 2),
+                            (p1, axis + width / 2),
+                            (p1, axis - width / 2),
+                            (p0, axis - width / 2)]))
         return unary_union(polys)
-    
+
+    @property
     def max_depth(self):
-        """
-        Returns
-        -------
-        positive float
-            The depth (or width) of the dam section,
-            unit: m
-
-        """
-        _, miny, _, maxy = self.cutting_surface().bounds
+        _, miny, _, maxy = self.cutting_surface.bounds
         return maxy - miny
-    
+
+    @property
     def axis(self):
-        """
-        Returns
-        -------
-        float
-            The axis of the dam section,
-            unit: m
-
-        """
-        _, miny, _, maxy = self.cutting_surface().bounds
+        _, miny, _, maxy = self.cutting_surface.bounds
         return (maxy + miny) / 2
-    
-    def segments_above(self):
-        """
-        Returns
-        -------
-        segs_above : list of Segment instances
-            Segments or parts of segments above the cutting (shear) surface
 
-        """
-        left_contact = self.left_contact()
-        right_contact = self.right_contact()
-        left_x = self.lefternmost_x()
-        right_x = self.righternmost_x()
-        highest_y = self.highest_point().y
-        box = Polygon(
-            [left_contact,
-             right_contact,
-             (right_x, right_contact.y),
-             (right_x, highest_y),
-             (left_x, highest_y),
-             (left_x, left_contact.y)]
-            )
+    @property
+    def segments_above_ground(self):
+        box = Polygon([
+            self.left_contact,
+            self.right_contact,
+            (self.bounding_box['maxx'], self.contact_right),
+            (self.bounding_box['maxx'], self.bounding_box['maxy']),
+            (self.bounding_box['minx'], self.bounding_box['maxy']),
+            (self.bounding_box['minx'], self.contact_left)])
         segs_above = []
         for seg in self.segments:
             if seg.poly.intersects(box):
@@ -227,16 +120,8 @@ class Pillar:
                         )
                     )
         return segs_above
-    
-    def bottom_angle(self):
-        """
-        Returns
-        -------
-        float
-            Shear surface angle,
-            unit: degrees
 
-        """
-        left, right = self.left_contact(), self.right_contact()
-        ratio = (right.y - left.y) / (right.x - left.x)
-        return math.degrees(math.atan(ratio))      
+    @property
+    def bottom_angle(self):
+        ratio = (self.right_contact.y - self.left_contact.y) / (self.right_contact.x - self.left_contact.x)
+        return math.degrees(math.atan(ratio))
