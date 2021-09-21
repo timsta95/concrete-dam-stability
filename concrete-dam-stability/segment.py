@@ -18,7 +18,7 @@ class Segment:
             raise ValueError('poly is not a Polygon')
         if not self.width > 0:
             raise ValueError('width is not greater than zero')
-        if not self.spec_weight > 0:
+        if not self.spec_weight >= 0:
             raise ValueError('spec_weight is not greater than zero')
         if not (isinstance(self.axis, float) or isinstance(self.axis, int)):
             raise ValueError('axis is not numeric')

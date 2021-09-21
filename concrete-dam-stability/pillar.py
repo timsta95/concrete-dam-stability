@@ -1,9 +1,13 @@
 import math
 from dataclasses import dataclass
 from functools import cached_property
-from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, Polygon
+from shapely.geometry import (
+    Point, MultiPoint, LineString, MultiLineString, Polygon)
 from shapely.ops import unary_union
 from segment import Segment
+
+BUTTRESS = 'Platedam'
+GRAVITY = 'Gravitasjonsdam'
 
 @dataclass
 class Pillar:
@@ -28,8 +32,7 @@ class Pillar:
             raise ValueError('invalid crest width')
         if self.phi < 0 or self.phi > 90:
             raise ValueError('invalid phi')
-        lower = self.dam_type.lower()
-        if not (lower.startswith('gr') or lower.startswith('pl')):
+        if not self.dam_type in (BUTTRESS, GRAVITY):
             raise ValueError('dam type not recognised')
         if not isinstance(self.name, str):
             raise ValueError('invalid name')
@@ -123,5 +126,6 @@ class Pillar:
 
     @property
     def bottom_angle(self):
-        ratio = (self.right_contact.y - self.left_contact.y) / (self.right_contact.x - self.left_contact.x)
+        ratio = (self.right_contact.y - self.left_contact.y) \
+            / (self.right_contact.x - self.left_contact.x)
         return math.degrees(math.atan(ratio))

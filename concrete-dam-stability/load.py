@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from typing import ClassVar
 from functools import cached_property
-from shapely.geometry import Point, MultiPoint, LineString, MultiLineString, Polygon
+from shapely.geometry import (
+    Point, MultiPoint, LineString, MultiLineString, Polygon)
 from shapely.ops import unary_union
 from segment import Segment
 from dam import Dam
 
 class LoadMethods:
+
     @property
     def segments(self):
         pass
@@ -180,7 +182,7 @@ class Islast(BaseLoad, LoadMethods):
     ice_load: float
 
     def __post_init__(self):
-        if not self.ice_load > 0:
+        if not self.ice_load >= 0:
             raise ValueError('invalid ice load')
 
     @cached_property

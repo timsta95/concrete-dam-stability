@@ -1,207 +1,102 @@
-import stability
+import os
+from dataclasses import dataclass
+from functools import cached_property
 import pandas as pd
+import stability as stb
+from dam import Dam
 
-class Evaluation:
-    """
-    Evaluate stability (sliding, overturning) in accordance with NVE's guidelines/
-    directives
+HEADER = ['Sikkerhet mot','Lasttilfelle', 'Damseksjon', 
+          'Sikkherhetsfaktor', 'Sikkerhetskrav', 'Stabilitet']
 
-    """
+BUTTRESS = 'Platedam'
+GRAVITY = 'Gravitasjonsdam'
+
+GL = 'Glidning'
+VE = 'Velting'
+
+LEVELS = ('HRV + is', 'DFV', 'MFV')
+
+OK = 'ok'
+NOT_OK = 'ikke ok'
+
+ICE_LOAD = 100
+
+GL_DICT = {GRAVITY: (1.5, 1.5, 1.1), BUTTRESS: (1.4, 1.4, 1.1)}
+VE_DICT = {GRAVITY: (1/12, 1/12, 1/6), BUTTRESS: (1.4, 1.4, 1.3)}
+
+class SortedLevels:
+
+    ice_loads = (ICE_LOAD, 0, 0)
     
-    def __init__(self, dam, levels):
-        """
-        Parameters
-        ----------
-        dam : instance of Dam
-        levels: list
-            List of water levels (HRV, DFV, MFV)
+    @property
+    def sorted_levels(self):
+        return sorted(self.levels)
 
-        Returns
-        -------
-        None.
+    @staticmethod
+    def compare(value, threshold1, threshold2 = None):
+        if threshold2:
+            if value >= threshold1 and value <= threshold2:
+                return OK
+            else:
+                return NOT_OK
+        else:
+            if value >= threshold1:
+                return OK
+            else:
+                return NOT_OK
 
-        """
-        self.dam = dam
-        self.levels = levels
-    
+@dataclass
+class Evaluation(SortedLevels):
+    dam: Dam
+    levels: list
+
+    @cached_property
     def stability(self):
-        """
-        Calculate dam stability for the given water levels
+        return [stb.Stability(self.dam, level, ice) for level, ice in zip(
+            self.sorted_levels, self.ice_loads)]
 
-        Returns
-        -------
-        list
-            List of stability coefficients
-        """
-        stab_list = []
-        for level in self.levels:
-            if level == min(self.levels):
-                stab_list.append(
-                    stability.Stability(self.dam, level)
-                    )
-            else:
-                stab_list.append(
-                    stability.Stability(self.dam, level, ice = 0)
-                    )
-        return stab_list
-    
+    @property
     def glidning(self):
-        """
-        Evaluate stability coefficients by comparing them to
-        threshold values from NVE's guidelines (sliding)
+        gl_list = [i.glidning for i in self.stability]
+        results = []
+        for idx, (gl, name) in enumerate(zip(gl_list, LEVELS)):
+            for gl_i, p in zip(gl, self.dam.pillars):
+                safety = GL_DICT[p.dam_type][idx]
+                result = self.compare(gl_i, safety)
+                results.append([
+                    GL, name, p.name, round(gl_i, 2), safety, result])
+        return results
 
-        Returns
-        -------
-        list
-            List of tuples:
-            - failure mode (sliding)
-            - water level name (HRV, DFV, MFV)
-            - pillar name
-            - stability coefficient
-            - threshold
-            - stability (yes/ no)
-        """
-        gl_list = [i.glidning() for i in self.stability()]
-        
-        gr_normal = 1.5
-        gr_ulykke = 1.1
-        pl_normal = 1.4
-        pl_ulykke = 1.1
-        
-        result_list = []
-        
-        for (level, gl) in zip(self.levels, gl_list):
-            
-            if level == max(self.levels):
-                level_name = 'MFV'
-            elif level == min(self.levels):
-                level_name = 'HRV + is'
-            else:
-                level_name = 'DFV'
-            
-            for (gl_i, p) in zip(gl, self.dam.pillars):
-                
-                if p.dam_type.startswith('Gr'):
-                    normal = gr_normal
-                    ulykke = gr_ulykke
-                elif p.dam_type.startswith('Pl'):
-                    normal = pl_normal
-                    ulykke = pl_ulykke
-                    
-                if level == max(self.levels):
-                    threshold = ulykke
-                else:
-                    threshold = normal
-                    
-                if gl_i >= threshold:
-                    result = 'ok'
-                else:
-                    result = 'ikke ok'
-                
-                result_list.append(
-                    ['Glidning', level_name, p.name, round(gl_i, 2),
-                     threshold, result]
-                    )
-        
-        return result_list
-    
+    @property
     def velting(self):
-        """
-        Evaluate stability coefficients by comparing them to
-        threshold values from NVE's guidelines (overturning)
+        vm_list, vr_list = zip(
+            *[(i.velting_moment, i.velting_resultant) for i in self.stability])
+        results = []
+        for idx, (vm, vr, name) in enumerate(zip(vm_list, vr_list, LEVELS)):
+            for vm_i, vr_i, p in zip(vm, vr, self.dam.pillars):
+                safety = VE_DICT[p.dam_type][idx]
+                if p.dam_type == GRAVITY:
+                    v_i = vr_i
+                    dist = p.right_contact.x - p.left_contact.x
+                    min_dist = dist * safety
+                    max_dist = dist - min_dist
+                    result = self.compare(v_i, min_dist, max_dist)
+                elif p.dam_type == BUTTRESS:
+                    v_i = vm_i
+                    result = self.compare(v_i, safety)
+                results.append([
+                    VE, name, p.name, round(v_i, 2), safety, result])
+        return results
 
-        Returns
-        -------
-        list
-            List of tuples:
-            - failure mode (overturning)
-            - water level name (HRV, DFV, MFV)
-            - pillar name
-            - stability coefficient
-            - threshold
-            - stability (yes/ no)
-        """
-        vm_list = [i.velting_moment() for i in self.stability()]
-        vr_list = [i.velting_resultant() for i in self.stability()]
-        
-        vm_normal = 1.4
-        vm_ulykke = 1.3
-        
-        vr_normal = 1 / 12
-        vr_ulykke = 1 / 6
-        
-        result_list = []
-        
-        for (level, vm, vr) in zip(self.levels, vm_list, vr_list):
-            
-            if level == max(self.levels):
-                level_name = 'MFV'
-            elif level == min(self.levels):
-                level_name = 'HRV + is'
-            else:
-                level_name = 'DFV'
-            
-            for (vm_i, vr_i, p) in zip(vm, vr, self.dam.pillars):
-                
-                if p.dam_type.startswith('Gr'):
-                    normal = vr_normal
-                    ulykke = vr_ulykke
-                    
-                    if level == max(self.levels):
-                        threshold = ulykke
-                    else:
-                        threshold = normal
-                        
-                    dist = p.right_contact().x - p.left_contact().x
-                    min_dist = dist * threshold
-                    max_dist = dist - (dist * threshold)
-                    
-                    if vr_i >= min_dist and vr_i <= max_dist:
-                        result = 'ok'
-                    else:
-                        result = 'ikke ok'
-                    result_list.append(
-                        ['Velting', level_name, p.name, round(vr_i, 2),
-                        f'{round(min_dist, 2)} - {round(max_dist, 2)}',
-                        result]
-                        )
-                    
-                    
-                elif p.dam_type.startswith('Pl'):
-                    normal = vm_normal
-                    ulykke = vm_ulykke
-                    
-                    if level == max(self.levels):
-                        threshold = ulykke
-                    else:
-                        threshold = normal
-                        
-                    if vm_i >= threshold:
-                        result = 'ok'
-                    else:
-                        result = 'ikke ok'
-                    
-                    result_list.append(
-                        ['Velting', level_name, p.name, round(vm_i, 2),
-                         threshold, result]
-                        )
-        return result_list
-    
-    def write_file(self, file_name):
-        """
-        Create simple overview of results ofstability calculations
-        as Excel file
-
-        Returns
-        -------
-        None.
-        
-        """
-        gl = self.glidning()
-        ve = self.velting()
-        
-        header = ['Sikkerhet mot', 'Lasttilfelle', 'Damseksjon',
-                  'Sikkherhetsfaktor', 'Sikkerhetskrav', 'Stabilitet']
-        df = pd.DataFrame(gl + ve, columns = header)
-        df.to_excel(file_name, index = False)
-        print(f'Evaluation written to Excel file ({file_name})')    
+    def write_excel(self, path):
+        #to do: allow backslashes
+        directory = ''.join(path.split('/')[:-1])
+        if not os.path.isdir(directory):
+            raise ValueError('Invalid file path')
+        elif not path.endswith('.xlsx'):
+            raise ValueError('Invalid file extension')
+        else:
+            gl, ve = self.glidning, self.velting
+            df = pd.DataFrame(self.glidning + self.velting, columns=HEADER)
+            df.to_excel(path, index=False)
+            print(f'Evaluation saved as Excel file ({path})')      

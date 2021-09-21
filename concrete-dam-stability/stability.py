@@ -8,17 +8,16 @@ from dam import Dam
 class Stability:
     dam: Dam
     level: float
-    ice: float = 100
+    ice: float
 
     @cached_property
     def basic(self):
-        ice = Islast(self.dam, self.level, self.ice)
-        vt = Vanntrykk(self.dam, self.level)
-        vv = Vannvekt(self.dam, self.level)
-        ov = Overtopping(self.dam, self.level)
-        op = Opptrykk(self.dam, self.level)
-        ev = Egenvekt(self.dam)
-        return [ice, vt, vv, ov, op, ev]
+        return [Islast(self.dam, self.level, self.ice),
+            Vanntrykk(self.dam, self.level),
+            Vannvekt(self.dam, self.level),
+            Overtopping(self.dam, self.level),
+            Opptrykk(self.dam, self.level),
+            Egenvekt(self.dam)]
 
     @cached_property
     def basic_segments(self):
@@ -32,8 +31,8 @@ class Stability:
 
     @property
     def segments_per_pillar(self): #formally draw_per_pillar()
-        zipped = zip(self.basic_segments)
-        return [[ice, vt, vv, ov] + op + ev for ice, vt, vv, ov, op, ev in zipped]
+        return [[ice, vt, vv, ov] + op + ev for ice, vt, vv, ov, op, ev in zip(
+            self.basic_segments)]
 
     @cached_property
     def loads(self):
@@ -51,22 +50,44 @@ class Stability:
 
     @cached_property
     def moment(self):
-        pass
+        pts = [p.right_contact for p in self.dam.pillars]
+        ice, vt, vv, ov, op, ev = self.loads
+        ice_c, vt_c, vv_c, ov_c, op_c, ev_c = [i.centroids for i in self.basic]
+        moments = []
+        for idx, pt in enumerate(pts):
+            ice_m = ice[idx] * (ice_c[idx].y - pt.y)
+            vt_m = vt[idx] * (vt_c[idx].y - pt.y)
+            vv_m = vv[idx] * (pt.x - vv_c[idx].x)
+            ov_m = ov[idx] * (pt.x - ov_c[idx].x)
+            op_m = op[idx] * (pt.x - op_c[idx].x)
+            ev_m = ev[idx] * (pt.x - ev_c[idx].x)
+            moments.append([ice_m, vt_m, vv_m, ov_m, op_m, ev_m])
+        return moments
 
     @property
     def glidning(self):
-        pass
+        alphas, phis = zip(*[(p.bottom_angle, p.phi) for p in self.dam.pillars])
+        ice_load, vt_load, vv_load, ov_load, op_load, ev_load = self.loads
+        glidning = []
+        for (alpha, phi, ice, vt, vv, ov, op, ev) in zip(
+                alphas, phis, ice_load, vt_load,
+                vv_load, ov_load, op_load, ev_load):
+            fh = ice + vt
+            fv = vv + ov + op + ev
+            glidning.append(
+                abs((fv * math.tan(math.radians(phi + alpha))) / fh))
+        return glidning
 
     @property
     def velting_resultant(self):
-        pass
+        return [sum(m) / math.sqrt(fh**2 + fv**2) for m, fh, fv in zip(
+            self.moment, self.horizontal_loads, self.vertical_loads)]
 
     @property
     def velting_moment(self):
-        pass
-
-
-
-    
-
-
+        s_list = []
+        for m_list in self.moment:
+            m_pos = sum([m for m in m_list if m >= 0])
+            m_neg = sum([m for m in m_list if m < 0])
+            s_list.append(abs(m_pos / m_neg)) 
+        return s_list  
