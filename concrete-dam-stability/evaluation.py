@@ -86,17 +86,4 @@ class Evaluation(SortedLevels):
                     result = self.compare(v_i, safety)
                 results.append([
                     VE, name, p.name, round(v_i, 2), safety, result])
-        return results
-
-    def write_excel(self, path):
-        #to do: allow backslashes
-        directory = ''.join(path.split('/')[:-1])
-        if not os.path.isdir(directory):
-            raise ValueError('Invalid file path')
-        elif not path.endswith('.xlsx'):
-            raise ValueError('Invalid file extension')
-        else:
-            gl, ve = self.glidning, self.velting
-            df = pd.DataFrame(self.glidning + self.velting, columns=HEADER)
-            df.to_excel(path, index=False)
-            print(f'Evaluation saved as Excel file ({path})')      
+        return results     

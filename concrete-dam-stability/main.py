@@ -1,7 +1,7 @@
 from segment import Segment
 from pillar import Pillar
 from dam import Dam
-import evaluation
+import export
 from shapely.geometry import Polygon
 
 from timeit import default_timer as timer
@@ -17,6 +17,6 @@ pillar2 = Pillar([seg3, seg4], 0, 3, 1, 50, 'Platedam', 'pillar2')
 dam = Dam([pillar1, pillar2])
 levels = [2, 4, 6]
 start = timer()
-evaluation.Evaluation(dam, levels).write_excel('../test.xlsx')
+export.Export(dam, levels).export('../test')
 print(round(timer() - start, 5))
 print('finished')

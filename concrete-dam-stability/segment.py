@@ -28,3 +28,15 @@ class Segment:
         self.centroid = self.poly.centroid
         self.area = self.poly.area
         self.load = self.area * self.width * self.spec_weight
+
+    @property
+    def coords(self):
+        return self.poly.exterior.coords.xy
+
+    @property
+    def x_coords(self):
+        return list(self.coords[0])
+
+    @property
+    def y_coords(self):
+        return list(self.coords[1])
