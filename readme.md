@@ -1,3 +1,5 @@
+# !!Archived!! Updated, maintained, pip-installable and rebranded version available at [stabilipy] (https://github.com/timsta95/stabilipy)
+
 # Concrete dam stability
 
 &copy; timsta95, 2021
